@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATLAS</title>
+  
+  <!-- Link to Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Link to Leaflet CSS (1.7.1) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+
+  <!-- Link to Leaflet Draw CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  
+  <style>
+    /* Main layout container */
+    #main-container {
+      display: flex;
+      height: 100vh; /* Full height minus the input box */
+    }
+    /* Sidebar styles */
+    #sidebar {
+      width: 20%; /* Adjusted to 20% */
+      background-color: #2d3748; /* Tailwind color: gray-800 */
+      color: white;
+      padding: 1rem;
+      overflow-y: auto;
+    }
+    /* Map container */
+    #map {
+      width: 80%; /* Adjusted to 80% */
+      position: relative; /* Allow positioning of the input box within */
+    }
+    /* Center the input box within the map container */
+    #input-container {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000; /* Ensure it stays above the map */
+      width: 50%; /* Set a max width for the input box */
+    }
+    /* Styling for the input box */
+    #queryInput {
+      font-size: 1.125rem; /* Larger font size */
+      border: 2px solid #4a5568; /* Dark grey border */
+      box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2); /* Box shadow */
+      padding: 0.75rem; /* Larger padding for a more prominent input */
+    }
+  </style>
+</head>
+<body class="bg-gray-100">
+
+  <!-- Main Content Container (Map + Sidebar) -->
+  <div id="main-container">
+    <!-- Map Container -->
+    <div id="map">
+      <!-- Input Text Box Centered in the Map Container -->
+      <div id="input-container" class="p-4">
+        <input
+          type="text"
+          id="queryInput"
+          placeholder="Type your Natural Language Query Here. Enter to Search Normally, Alt+Enter to Submit ATLAS Query."
+          class="w-full p-2 text-gray-900 rounded-md outline-none"
+        />
+      </div>
+    </div>
+
+    <!-- Permanent Sidebar -->
+    <div id="sidebar">
+      <h2 class="text-xl font-bold mb-4">Layers</h2>
+      <ul id="layersList" class="space-y-2">
+        <!-- Layers will be appended here -->
+      </ul>
+    </div>
+  </div>
+
+
+  <!-- Include Leaflet JavaScript (1.7.1) -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+  <!-- Include Leaflet Draw JavaScript -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  
+  <script>
+    // Initialize the base layers
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '© OpenStreetMap contributors'
+    });
+
+    // Free Satellite Imagery (from Esri)
+    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 18,
+      attribution: 'Imagery © Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+    });
+
+    // CartoDB Positron layer (only labels, no background)
+    const cartoLabelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap contributors & CARTO'
+    });
+
+    // Hybrid layer using CartoDB labels and Esri satellite imagery
+    const cartoHybridLayer = L.layerGroup([satelliteLayer, cartoLabelsLayer]);
+
+    // Esri World Imagery with English Labels
+    const esriSatelliteWithEnglishLabels = L.layerGroup([
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Imagery © Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+      }),
+      L.tileLayer('https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Labels © Esri',
+        maxZoom: 18
+      })
+    ]);
+
+    // Initialize the Leaflet map with the default OSM layer
+    const map = L.map('map', {
+      center: [1.6508, 20.0171],
+      zoom: 4,
+      layers: [osmLayer] // Set OSM as the default layer
+    });
+
+    // Define base layers for the layer control
+    const baseLayers = {
+      "OSM": osmLayer,
+      "Satellite + Carto Labels": cartoHybridLayer,
+      "Esri Satellite + English Labels": esriSatelliteWithEnglishLabels
+    };
+
+    // Add layer control to toggle between base layers
+    L.control.layers(baseLayers).addTo(map);
+
+
+
+  
+    let polygonCounter = 1; // Counter to keep track of polygons
+    let pointCounter = 1; // Counter to keep track of points
+    const layers = {}; // Object to store layers by ID
+  
+    // Initialize the Leaflet Draw control and add it to the map
+    const drawControl = new L.Control.Draw({
+      draw: {
+        polygon: {
+          allowIntersection: false, // Restricts shape to simple polygons
+          showArea: true,
+          shapeOptions: {
+            color: 'blue'
+          }
+        },
+        polyline: false,
+        rectangle: false,
+        circle: false,
+        marker: true, // Enable point/marker drawing
+        circlemarker: false
+      },
+      edit: false
+    });
+    
+    map.addControl(drawControl);
+  
+    // Handle the creation of new polygons or points
+    map.on(L.Draw.Event.CREATED, function (event) {
+      const layer = event.layer;
+      addLayerToMap(layer);
+    });
+  
+    // Function to add a drawn polygon or point to the map and sidebar list
+    function addLayerToMap(layer) {
+      let label = '';
+      const layerId = `layer-${polygonCounter + pointCounter}`;
+  
+      // Check if layer is a polygon or point and label accordingly
+      if (layer instanceof L.Polygon) {
+        label = `Polygon ${polygonCounter++}`;
+      } else if (layer instanceof L.Marker) {
+        label = `Point ${pointCounter++}`;
+      }
+  
+      layers[layerId] = layer; // Store the layer in the layers object
+      layer.addTo(map);
+  
+      // Add layer to the sidebar list with the appropriate label
+      const layersList = document.getElementById("layersList");
+      const listItem = document.createElement("li");
+      listItem.className = "flex items-center justify-between mb-2";
+      listItem.id = `${layerId}-item`;
+      listItem.innerHTML = `
+        <div class="flex items-center">
+          <input type="checkbox" id="${layerId}-checkbox" checked class="mr-2" onchange="toggleLayer('${layerId}')">
+          <label id="${layerId}-label" for="${layerId}-checkbox">${label}</label>
+        </div>
+        <div>
+          <button onclick="renameLayer('${layerId}')" class="text-blue-500 hover:underline mr-2">Rename</button>
+          <button onclick="deleteLayer('${layerId}')" class="text-red-500 hover:underline">Delete</button>
+        </div>
+      `;
+      layersList.appendChild(listItem);
+      return layerId;
+    }
+  
+    // Function to toggle layer visibility
+    function toggleLayer(layerId) {
+      const checkbox = document.getElementById(`${layerId}-checkbox`);
+      if (checkbox.checked) {
+        layers[layerId].addTo(map);
+      } else {
+        map.removeLayer(layers[layerId]);
+      }
+    }
+  
+    // Function to rename a layer
+    function renameLayer(layerId) {
+      const currentLabel = document.getElementById(`${layerId}-label`).innerText;
+      const newLabel = prompt("Enter a new name for the layer:", currentLabel);
+  
+      if (newLabel && newLabel.trim() !== "") {
+        document.getElementById(`${layerId}-label`).innerText = newLabel.trim();
+      }
+    }
+  
+    // Function to delete a layer
+    function deleteLayer(layerId) {
+      // Remove the layer from the map
+      if (layers[layerId]) {
+        map.removeLayer(layers[layerId]);
+        delete layers[layerId];
+      }
+  
+      // Remove the layer from the sidebar list
+      const listItem = document.getElementById(`${layerId}-item`);
+      if (listItem) {
+        listItem.remove();
+      }
+    }
+
+
+    // Function to search location using OpenStreetMap Nominatim API
+    function searchLocation(query) {
+      if (!query) {
+        alert("Please type in a location to search.");
+        return;
+      }  
+      fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.length > 0) {
+
+            const { lat, lon, display_name, address} = data[0];
+            map.setView([lat, lon], 16); // Zoom to the found location
+            
+            // Check if the address contains a building name
+            let buildingName = address.building || address.leisure || address.amenity || address.shop || address.office;
+
+            // Fallback to parsing display_name if no specific building field is available
+            if (!buildingName) {
+                buildingName = display_name.split(",")[0]; // Get the first part as a fallback
+            }
+            
+            mmarker = createmarker_with_data(lat,lon,buildingName, display_name)
+
+            mylayerId = addLayerToMap(mmarker);
+            
+            // rename a layer
+            document.getElementById(`${mylayerId}-label`).innerText = buildingName;
+
+            //alert(`Found location: ${display_name}`);
+          } else {
+            alert("Location not found.");
+          }
+          document.getElementById("queryInput").value = ""; // Clear the query
+        })
+        .catch(error => console.error("Error:", error));
+    }
+
+    // Function to submit the query with structured data
+    function submitQuery() {
+      const query = document.getElementById("queryInput").value.trim();
+      const regionOfInterest = [];
+
+      // Check if the query is empty
+      if (!query) {
+        alert("Please type in a natural language query.");
+        return;
+      }
+
+      // Collect selected layers and organize them as RegionOfInterest objects
+      for (const layerId in layers) {
+        const checkbox = document.getElementById(`${layerId}-checkbox`);
+        if (checkbox && checkbox.checked) {
+          const layer = layers[layerId];
+          let regionData = { type: '', coordinates: [] };
+
+          // Determine if the layer is a polygon or point and format accordingly
+          if (layer instanceof L.Polygon) {
+            regionData.type = 'polygon';
+            const latLngs = layer.getLatLngs()[0]; // Get coordinates for the polygon
+            regionData.coordinates = latLngs.map(latlng => ({ lat: latlng.lat, long: latlng.lng }));
+          } else if (layer instanceof L.Marker) {
+            regionData.type = 'point';
+            const latLng = layer.getLatLng();
+            regionData.coordinates = [{ lat: latLng.lat, long: latLng.lng }];
+          }
+
+          // Add the formatted region data to the regionsOfInterest list
+          regionOfInterest.push(regionData);
+        }
+      }
+
+      // Check if any layers are selected
+      if (regionOfInterest.length === 0) {
+        alert("Please draw polygons or add points first to define regions of interest.");
+        return;
+      }
+
+      // Create the data to send to the server
+      const dataToSend = {
+        query: query,
+        regionOfInterest: regionOfInterest
+      };
+
+      // Send the data to the server
+      fetch("/submit_query", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(dataToSend)
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log("Server response:", data);
+        // Check if there is an error in the response
+        if (data.hasOwnProperty("error")) {
+          alert("Error: " + data.error);
+        } else {
+          alert("Query submitted successfully!");
+          document.getElementById("queryInput").value = ""; // Clear the query
+          
+          // Format current timestamp
+          const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+          
+          // Format the layer name with timestamp and query
+          const layerName = `${timestamp} - ${query}`;
+
+          // Pass both the response data and formatted name to throwoutput_to_layer
+          throwoutput_to_layer(data["response"], layerName);
+        }
+      })
+      .catch(error => console.error("Error:", error));
+    }
+
+    // Attach a keydown event listener to the whole document
+    document.addEventListener("keydown", handleGlobalKeyPress);
+
+    // Function to handle key events anywhere on the page
+    function handleGlobalKeyPress(event) {
+      const query = document.getElementById("queryInput").value.trim();
+
+      // Alt + Enter triggers query submission
+      if (event.altKey && event.key === "Enter") {
+        submitQuery();
+        event.preventDefault(); // Prevent default behavior
+        return;
+      }
+
+      // Enter triggers location search
+      if (event.key === "Enter") {
+        searchLocation(query);
+        event.preventDefault();
+      }
+    }
+
+    // Create an array of marker locations
+    var markerdata = [
+      { lat: 51.505, lng: -0.09, title: "Marker 1", address: "Etike, Angla, Cameron"},
+      { lat: 51.515, lng: -0.1, title: "Marker 2", address: ""},
+      { lat: 51.525, lng: -0.11, title: "Marker 3", address: ""}
+
+    ];
+    
+    function createmarker_with_data(lat,lon,buildingName, tags) {
+      //alert(buildingName)
+      const marker = L.marker([lat, lon]).addTo(map);
+      marker.bindPopup("<b>" +buildingName + "</b><br>Tags: <div style='word-wrap:break-word;'>" + JSON.stringify(tags) + "</div>").openPopup();
+      return marker   
+    }
+  
+    function throwoutput_to_layer(markers, layerName) {
+      // Create a LayerGroup for markers
+      var markerLayer = L.layerGroup();
+
+      // Loop through the markers array and add a marker for each location
+      markers.forEach(function(markerData) {
+        if (markerData.lat == null || markerData.lng == null) {
+          return;
+        }
+        mmarker = createmarker_with_data(markerData.lat, markerData.lng, markerData.title, markerData.tags);
+        mmarker.addTo(markerLayer);
+      });
+
+      // Add the markerLayer to the map initially
+      mylayerId = addLayerToMap(markerLayer);
+
+      // Rename the layer in the sidebar with the provided layerName
+      document.getElementById(`${mylayerId}-label`).innerText = layerName;
+    }
+
+</script>
+  
+  
+  
+  
+</body>
+</html>
